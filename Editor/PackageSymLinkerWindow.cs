@@ -80,19 +80,20 @@ namespace CodeWriter.PackageSymLinker
             scroll = GUILayout.BeginScrollView(scroll, false, true);
             foreach (var folder in directories)
             {
-                GUILayout.BeginHorizontal(EditorStyles.helpBox);
+                GUILayout.BeginVertical(EditorStyles.helpBox);
 
-                GUILayout.BeginVertical();
+                GUILayout.BeginHorizontal();
                 GUILayout.Label(folder.name, EditorStyles.boldLabel);
-                GUILayout.Label(folder.sourcePath, EditorStyles.miniLabel);
-                GUILayout.EndVertical();
-
                 if (GUILayout.Button("Delete link", GUILayout.Width(120)))
                 {
                     DeletePackage(folder.path);
                 }
 
                 GUILayout.EndHorizontal();
+
+                GUILayout.Label(folder.sourcePath, EditorStyles.miniLabel);
+
+                GUILayout.EndVertical();
             }
 
             EditorGUILayout.EndScrollView();
@@ -102,8 +103,9 @@ namespace CodeWriter.PackageSymLinker
         {
             var packagesFolderPath = GetPackagesFolderPath();
 
-            if (!TryExecuteCmd($"dir \"{packagesFolderPath}\"", out var result))
+            if (TryExecuteCmd($"dir \"{packagesFolderPath}\"", out var result) != 0)
             {
+                Debug.LogError($"Failed to list directories in {packagesFolderPath}");
                 return;
             }
 
@@ -169,15 +171,17 @@ namespace CodeWriter.PackageSymLinker
             var dstPackagesFolderPath = GetPackagesFolderPath();
             var dstPackagePath = Path.Combine(dstPackagesFolderPath, packageInfo.name);
 
-            if (Directory.Exists(dstPackagePath))
+            var fileExist = TryExecuteCmd($"dir \"{dstPackagePath}\"", out _) != 1;
+            if (fileExist)
             {
                 Debug.LogError($"Directory {dstPackagePath} already exist");
                 return;
             }
 
             var command = $"mklink /j \"{dstPackagePath}\" \"{srcFolderPath}\"";
-            if (!TryExecuteCmd(command, out _))
+            if (TryExecuteCmd(command, out _) != 0)
             {
+                Debug.LogError("Failed to link package");
                 return;
             }
 
@@ -188,8 +192,9 @@ namespace CodeWriter.PackageSymLinker
         private void DeletePackage(string path)
         {
             var command = $"rd \"{path}\"";
-            if (!TryExecuteCmd(command, out _))
+            if (TryExecuteCmd(command, out _) != 0)
             {
+                Debug.LogError("Failed to delete package link");
                 return;
             }
 
@@ -205,7 +210,7 @@ namespace CodeWriter.PackageSymLinker
             return packageFolderPath.Replace('/', Path.DirectorySeparatorChar);
         }
 
-        public static bool TryExecuteCmd(string command, out string result)
+        public static int TryExecuteCmd(string command, out string result)
         {
             var startInfo = new ProcessStartInfo
             {
@@ -222,9 +227,8 @@ namespace CodeWriter.PackageSymLinker
             var launchProcess = Process.Start(startInfo);
             if (launchProcess == null || launchProcess.HasExited || launchProcess.Id == 0)
             {
-                Debug.LogError("Failed to start cmd process");
                 result = default;
-                return false;
+                return int.MinValue;
             }
 
             var output = new StringBuilder();
@@ -241,13 +245,12 @@ namespace CodeWriter.PackageSymLinker
 
             if (launchProcess.ExitCode != 0)
             {
-                Debug.LogError($"Cmd failed with code {launchProcess.ExitCode}: {error}");
                 result = default;
-                return false;
+                return launchProcess.ExitCode;
             }
 
             result = output.ToString();
-            return true;
+            return 0;
         }
 
         [Serializable]
