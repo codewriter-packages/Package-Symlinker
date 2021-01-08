@@ -2,7 +2,7 @@
   "name": "com.codewriter.package-symlinker",
   "displayName": "Package Symlinker",
   "description": "Tool for maintaining symbolic linked packages for Unity",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "unity": "2019.1",
   "license": "MIT",
   "author": "Vlad Vanifatov (https://github.com/vanifatovvlad)",

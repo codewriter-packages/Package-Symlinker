@@ -14,11 +14,10 @@ namespace CodeWriter.PackageSymLinker
 {
     public class PackageSymLinkerWindow : EditorWindow
     {
-        [MenuItem("Tools/Package Symlinker/Configure...")]
+        [MenuItem("Tools/Package Symlinker")]
         public static void OpenWindow()
         {
             var window = GetWindow<PackageSymLinkerWindow>();
-            window.titleContent = new GUIContent("Package Symlinker");
             window.Show();
         }
 
@@ -53,13 +52,6 @@ namespace CodeWriter.PackageSymLinker
             }
 
             GUILayout.FlexibleSpace();
-
-            if (GUILayout.Button("Reload", EditorStyles.toolbarButton))
-            {
-                Reload();
-            }
-
-            GUILayout.Space(5);
 
             GUILayout.EndHorizontal();
         }
@@ -139,6 +131,8 @@ namespace CodeWriter.PackageSymLinker
                     };
                 })
                 .ToList();
+
+            titleContent = new GUIContent($"Package Symlinker ({directories.Count})");
         }
 
         private void AddPackage()
