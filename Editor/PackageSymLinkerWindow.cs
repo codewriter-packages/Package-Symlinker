@@ -132,7 +132,14 @@ namespace CodeWriter.PackageSymLinker
                 })
                 .ToList();
 
-            titleContent = new GUIContent($"Package Symlinker ({directories.Count})");
+            if (this.directories.Count > 0)
+            {
+                titleContent = new GUIContent($"Package Symlinker ({directories.Count})");
+            }
+            else
+            {
+                titleContent = new GUIContent($"Package Symlinker");
+            }
         }
 
         private void AddPackage()
