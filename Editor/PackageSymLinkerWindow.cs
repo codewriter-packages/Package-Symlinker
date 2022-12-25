@@ -12,8 +12,11 @@ using Debug = UnityEngine.Debug;
 
 namespace CodeWriter.PackageSymLinker
 {
-    public class PackageSymLinkerWindow : EditorWindow
+    public class PackageSymLinkerWindow : EditorWindow, IHasCustomMenu
     {
+        private const string RecentPackagesPrefsKey = "PackageSymlinker_Recent";
+        private const char RecentPackagesSeparator = '#';
+
         [MenuItem("Tools/Package Symlinker")]
         public static void OpenWindow()
         {
@@ -23,21 +26,35 @@ namespace CodeWriter.PackageSymLinker
 
         [SerializeField] private List<SymlinkedDirInfo> directories = new List<SymlinkedDirInfo>();
         [SerializeField] private Vector2 scroll;
+        [SerializeField] private string[] recentPackages = Array.Empty<string>();
+        [SerializeField] private string[] recentPackageNames = Array.Empty<string>();
 
         private void OnEnable()
         {
-            Reload();
+            ReloadLinkedPackages();
+            RefreshRecentPackages();
         }
 
         private void OnFocus()
         {
-            Reload();
+            ReloadLinkedPackages();
+            RefreshRecentPackages();
         }
 
         private void OnGUI()
         {
             OnToolbarGUI();
-            OnContentGUI();
+
+            scroll = GUILayout.BeginScrollView(scroll, false, true);
+            OnLinkedPackagesGUI();
+            GUILayout.Space(50);
+            OnRecentPackagesGUI();
+            EditorGUILayout.EndScrollView();
+        }
+
+        public void AddItemsToMenu(GenericMenu menu)
+        {
+            menu.AddItem(new GUIContent("Clear Recent"), false, () => ClearRecentPackages());
         }
 
         private void OnToolbarGUI()
@@ -56,20 +73,21 @@ namespace CodeWriter.PackageSymLinker
             GUILayout.EndHorizontal();
         }
 
-        private void OnContentGUI()
+        private void OnLinkedPackagesGUI()
         {
             if (directories.Count == 0)
             {
-                GUILayout.FlexibleSpace();
+                GUILayout.Space(20);
                 GUILayout.BeginHorizontal();
                 GUILayout.FlexibleSpace();
                 GUILayout.Label("No symbolic linked packages in project", EditorStyles.largeLabel);
                 GUILayout.FlexibleSpace();
                 GUILayout.EndHorizontal();
-                GUILayout.FlexibleSpace();
+                GUILayout.Space(20);
             }
 
-            scroll = GUILayout.BeginScrollView(scroll, false, true);
+            GUILayout.Label("Linked packages", EditorStyles.largeLabel);
+
             foreach (var folder in directories)
             {
                 GUILayout.BeginVertical(EditorStyles.helpBox);
@@ -87,11 +105,53 @@ namespace CodeWriter.PackageSymLinker
 
                 GUILayout.EndVertical();
             }
-
-            EditorGUILayout.EndScrollView();
         }
 
-        private void Reload()
+        private void OnRecentPackagesGUI()
+        {
+            if (recentPackages.Length == 0)
+            {
+                return;
+            }
+
+            GUILayout.Label("Recent packages", EditorStyles.largeLabel);
+
+            for (var index = 0; index < recentPackages.Length; index++)
+            {
+                var packagePath = recentPackages[index];
+                var packageName = recentPackageNames[index];
+
+                if (string.IsNullOrEmpty(packageName))
+                {
+                    continue;
+                }
+
+                GUILayout.BeginVertical(EditorStyles.helpBox);
+
+                GUILayout.BeginHorizontal();
+                GUILayout.Label(packageName, EditorStyles.boldLabel);
+
+                if (IsPackageLinked(packageName))
+                {
+                    GUILayout.Label("Linked", EditorStyles.centeredGreyMiniLabel, GUILayout.Width(120));
+                }
+                else
+                {
+                    if (GUILayout.Button("Link", GUILayout.Width(120)))
+                    {
+                        AddPackage(packagePath);
+                    }
+                }
+
+                GUILayout.EndHorizontal();
+
+                GUILayout.Label(packagePath, EditorStyles.miniLabel);
+
+                GUILayout.EndVertical();
+            }
+        }
+
+        private void ReloadLinkedPackages()
         {
             var packagesFolderPath = GetPackagesFolderPath();
 
@@ -145,6 +205,11 @@ namespace CodeWriter.PackageSymLinker
         private void AddPackage()
         {
             var srcFolderPath = EditorUtility.OpenFolderPanel("Select Package", string.Empty, string.Empty);
+            AddPackage(srcFolderPath);
+        }
+
+        private void AddPackage(string srcFolderPath)
+        {
             if (string.IsNullOrEmpty(srcFolderPath))
             {
                 Debug.LogError("No folder selected");
@@ -186,8 +251,11 @@ namespace CodeWriter.PackageSymLinker
                 return;
             }
 
+            AddPackageToRecent(srcFolderPath);
             AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
-            Reload();
+            ReloadLinkedPackages();
+
+            EditorUtility.RequestScriptReload();
         }
 
         private void DeletePackage(string path)
@@ -200,7 +268,9 @@ namespace CodeWriter.PackageSymLinker
             }
 
             AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
-            Reload();
+            ReloadLinkedPackages();
+
+            EditorUtility.RequestScriptReload();
         }
 
         public static string GetPackagesFolderPath()
@@ -252,6 +322,60 @@ namespace CodeWriter.PackageSymLinker
 
             result = output.ToString();
             return 0;
+        }
+
+        private void RefreshRecentPackages()
+        {
+            recentPackages = EditorPrefs.GetString(RecentPackagesPrefsKey, "")
+                .Split(RecentPackagesSeparator, StringSplitOptions.RemoveEmptyEntries);
+
+            recentPackageNames = new string[recentPackages.Length];
+
+            for (var i = 0; i < recentPackageNames.Length; i++)
+            {
+                var packageJsonPath = Path.Combine(recentPackages[i], "package.json");
+                if (!File.Exists(packageJsonPath))
+                {
+                    continue;
+                }
+
+                var packageJsonString = File.ReadAllText(packageJsonPath);
+                var packageInfo = JsonUtility.FromJson<Package>(packageJsonString);
+
+                recentPackageNames[i] = packageInfo.name;
+            }
+        }
+
+        private void AddPackageToRecent(string path)
+        {
+            RefreshRecentPackages();
+
+            var list = recentPackages.ToList();
+            list.Remove(path);
+            list.Add(path);
+            recentPackages = list.ToArray();
+            EditorPrefs.SetString(RecentPackagesPrefsKey, string.Join(RecentPackagesSeparator, recentPackages));
+
+            RefreshRecentPackages();
+        }
+
+        private void ClearRecentPackages()
+        {
+            EditorPrefs.SetString(RecentPackagesPrefsKey, "");
+            RefreshRecentPackages();
+        }
+
+        private bool IsPackageLinked(string packageName)
+        {
+            foreach (var info in directories)
+            {
+                if (info.name == packageName)
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         [Serializable]
