@@ -84,6 +84,8 @@ namespace CodeWriter.PackageSymLinker
                 GUILayout.FlexibleSpace();
                 GUILayout.EndHorizontal();
                 GUILayout.Space(20);
+                
+                return;
             }
 
             GUILayout.Label("Linked packages", EditorStyles.largeLabel);
