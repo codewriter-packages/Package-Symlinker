@@ -254,8 +254,6 @@ namespace CodeWriter.PackageSymLinker
             AddPackageToRecent(srcFolderPath);
             AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
             ReloadLinkedPackages();
-
-            EditorUtility.RequestScriptReload();
         }
 
         private void DeletePackage(string path)
@@ -269,8 +267,6 @@ namespace CodeWriter.PackageSymLinker
 
             AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
             ReloadLinkedPackages();
-
-            EditorUtility.RequestScriptReload();
         }
 
         public static string GetPackagesFolderPath()
