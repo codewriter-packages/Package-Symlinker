@@ -25,9 +25,9 @@ namespace CodeWriter.PackageSymLinker
             window.Show();
         }
 
-        [SerializeField] private List<SymlinkedDirInfo> directories = new List<SymlinkedDirInfo>();
+        [SerializeField] private List<SymlinkedDirInfo> symLinks = new List<SymlinkedDirInfo>();
         [SerializeField] private Vector2 scroll;
-        [SerializeField] private string[] recentPackages = Array.Empty<string>();
+        [SerializeField] private string[] recentPackagesPaths = Array.Empty<string>();
         [SerializeField] private Package[] recentPackageInfo = Array.Empty<Package>();
 
         private void OnEnable()
@@ -55,7 +55,7 @@ namespace CodeWriter.PackageSymLinker
 
         public void AddItemsToMenu(GenericMenu menu)
         {
-            menu.AddItem(new GUIContent("Clear Recent"), false, () => ClearRecentPackages());
+            menu.AddItem(new GUIContent("Clear Recent"), false, ClearRecentPackages);
         }
 
         private void OnToolbarGUI()
@@ -79,7 +79,7 @@ namespace CodeWriter.PackageSymLinker
             var labelStyle = EditorStyles.boldLabel;
             labelStyle.richText = true;
             
-            if (directories.Count == 0)
+            if (symLinks.Count == 0)
             {
                 GUILayout.Space(20);
                 GUILayout.BeginHorizontal();
@@ -94,20 +94,20 @@ namespace CodeWriter.PackageSymLinker
 
             GUILayout.Label("Linked packages", EditorStyles.largeLabel);
 
-            foreach (var folder in directories)
+            foreach (var symLink in symLinks)
             {
                 GUILayout.BeginVertical(EditorStyles.helpBox);
 
                 GUILayout.BeginHorizontal();
-                GUILayout.Label($"{folder.package.name} : <i>{folder.package.version}</i>", labelStyle);
+                GUILayout.Label($"{symLink.package.name} : <i>{symLink.package.version}</i>", labelStyle);
                 if (GUILayout.Button("Delete link", GUILayout.Width(120)))
                 {
-                    DeletePackage(folder.path);
+                    DeletePackage(symLink.path);
                 }
 
                 GUILayout.EndHorizontal();
 
-                GUILayout.Label(folder.path, EditorStyles.miniLabel);
+                GUILayout.Label(symLink.path, EditorStyles.miniLabel);
 
                 GUILayout.EndVertical();
             }
@@ -115,16 +115,16 @@ namespace CodeWriter.PackageSymLinker
 
         private void OnRecentPackagesGUI()
         {
-            if (recentPackages.Length == 0)
+            if (recentPackagesPaths.Length == 0)
             {
                 return;
             }
 
             GUILayout.Label("Recent packages", EditorStyles.largeLabel);
 
-            for (var index = 0; index < recentPackages.Length; index++)
+            for (var index = 0; index < recentPackagesPaths.Length; index++)
             {
-                var packagePath = recentPackages[index];
+                var packagePath = recentPackagesPaths[index];
                 var package = recentPackageInfo[index];
 
                 if (string.IsNullOrEmpty(package.name))
@@ -163,11 +163,12 @@ namespace CodeWriter.PackageSymLinker
 
             var dirPaths = Directory.GetDirectories(packagesFolderPath);
 
-            directories = dirPaths
+            symLinks = dirPaths
                 .Where(path =>
                 {
                     const FileAttributes attrs = FileAttributes.Directory | FileAttributes.ReparsePoint;
-                    return (File.GetAttributes(path) & attrs) == attrs;
+                    var srcPackageJsonPath = Path.Combine(path, "package.json");
+                    return (File.GetAttributes(path) & attrs) == attrs && File.Exists(srcPackageJsonPath);
                 })
                 .Select(path =>
                 {
@@ -183,9 +184,9 @@ namespace CodeWriter.PackageSymLinker
                 })
                 .ToList();
 
-            if (directories.Count > 0)
+            if (symLinks.Count > 0)
             {
-                titleContent = new GUIContent($"Package Symlinker ({directories.Count})");
+                titleContent = new GUIContent($"Package Symlinker ({symLinks.Count})");
             }
             else
             {
@@ -243,6 +244,8 @@ namespace CodeWriter.PackageSymLinker
 #endif
             if (TryExecuteCmd(command, out _, out var error) != 0)
             {
+                //on osx return code can be not 0
+                //double check error
                 if(string.IsNullOrEmpty(error) == false)
                 {
                     Debug.LogError($"Failed to link package: {error}");
@@ -265,6 +268,8 @@ namespace CodeWriter.PackageSymLinker
 #endif
             if (TryExecuteCmd(command, out _, out var error) != 0)
             {
+                //on osx return code can be not 0
+                //double check error
                 if(string.IsNullOrEmpty(error) == false)
                 {
                     Debug.LogError($"Failed to delete package link: {error}");
@@ -331,14 +336,14 @@ namespace CodeWriter.PackageSymLinker
 
         private void RefreshRecentPackages()
         {
-            recentPackages = EditorPrefs.GetString(RecentPackagesPrefsKey, "")
+            recentPackagesPaths = EditorPrefs.GetString(RecentPackagesPrefsKey, "")
                 .Split(RecentPackagesSeparator, StringSplitOptions.RemoveEmptyEntries);
 
-            recentPackageInfo = new Package[recentPackages.Length];
+            recentPackageInfo = new Package[recentPackagesPaths.Length];
 
             for (var i = 0; i < recentPackageInfo.Length; i++)
             {
-                var packageJsonPath = Path.Combine(recentPackages[i], "package.json");
+                var packageJsonPath = Path.Combine(recentPackagesPaths[i], "package.json");
                 if (!File.Exists(packageJsonPath))
                 {
                     continue;
@@ -355,11 +360,11 @@ namespace CodeWriter.PackageSymLinker
         {
             RefreshRecentPackages();
 
-            var list = recentPackages.ToList();
+            var list = recentPackagesPaths.ToList();
             list.Remove(path);
             list.Add(path);
-            recentPackages = list.ToArray();
-            EditorPrefs.SetString(RecentPackagesPrefsKey, string.Join(RecentPackagesSeparator, recentPackages));
+            recentPackagesPaths = list.ToArray();
+            EditorPrefs.SetString(RecentPackagesPrefsKey, string.Join(RecentPackagesSeparator, recentPackagesPaths));
 
             RefreshRecentPackages();
         }
@@ -372,7 +377,7 @@ namespace CodeWriter.PackageSymLinker
 
         private bool IsPackageLinked(string packageName)
         {
-            foreach (var dir in directories)
+            foreach (var dir in symLinks)
             {
                 if (dir.package.name == packageName)
                 {
