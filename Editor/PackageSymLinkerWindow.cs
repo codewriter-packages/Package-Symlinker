@@ -230,14 +230,6 @@ namespace CodeWriter.PackageSymLinker
 
 #if UNITY_EDITOR_WIN
             var dstPackagePath = Path.Combine(dstPackagesFolderPath, packageInfo.name);
-
-            var fileExist = Directory.Exists(dstPackagePath);
-            if (fileExist)
-            {
-                Debug.LogError($"Directory {dstPackagePath} already exist");
-                return;
-            }
-
             var command = $"mklink /j \"{dstPackagePath}\" \"{srcFolderPath}\"";
 #else
             var command = $"ln -s {srcFolderPath} {dstPackagesFolderPath}";
