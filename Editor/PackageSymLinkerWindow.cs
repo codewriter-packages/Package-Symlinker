@@ -1,4 +1,4 @@
-﻿#if UNITY_EDITOR_WIN
+﻿#if UNITY_EDITOR
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -7,6 +7,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using UnityEditor;
+using UnityEditor.PackageManager;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 
@@ -27,7 +28,7 @@ namespace CodeWriter.PackageSymLinker
         [SerializeField] private List<SymlinkedDirInfo> directories = new List<SymlinkedDirInfo>();
         [SerializeField] private Vector2 scroll;
         [SerializeField] private string[] recentPackages = Array.Empty<string>();
-        [SerializeField] private string[] recentPackageNames = Array.Empty<string>();
+        [SerializeField] private Package[] recentPackageInfo = Array.Empty<Package>();
 
         private void OnEnable()
         {
@@ -75,6 +76,9 @@ namespace CodeWriter.PackageSymLinker
 
         private void OnLinkedPackagesGUI()
         {
+            var labelStyle = EditorStyles.boldLabel;
+            labelStyle.richText = true;
+            
             if (directories.Count == 0)
             {
                 GUILayout.Space(20);
@@ -95,7 +99,7 @@ namespace CodeWriter.PackageSymLinker
                 GUILayout.BeginVertical(EditorStyles.helpBox);
 
                 GUILayout.BeginHorizontal();
-                GUILayout.Label(folder.name, EditorStyles.boldLabel);
+                GUILayout.Label($"{folder.package.name} : <i>{folder.package.version}</i>", labelStyle);
                 if (GUILayout.Button("Delete link", GUILayout.Width(120)))
                 {
                     DeletePackage(folder.path);
@@ -103,7 +107,7 @@ namespace CodeWriter.PackageSymLinker
 
                 GUILayout.EndHorizontal();
 
-                GUILayout.Label(folder.sourcePath, EditorStyles.miniLabel);
+                GUILayout.Label(folder.path, EditorStyles.miniLabel);
 
                 GUILayout.EndVertical();
             }
@@ -121,9 +125,9 @@ namespace CodeWriter.PackageSymLinker
             for (var index = 0; index < recentPackages.Length; index++)
             {
                 var packagePath = recentPackages[index];
-                var packageName = recentPackageNames[index];
+                var package = recentPackageInfo[index];
 
-                if (string.IsNullOrEmpty(packageName))
+                if (string.IsNullOrEmpty(package.name))
                 {
                     continue;
                 }
@@ -131,9 +135,9 @@ namespace CodeWriter.PackageSymLinker
                 GUILayout.BeginVertical(EditorStyles.helpBox);
 
                 GUILayout.BeginHorizontal();
-                GUILayout.Label(packageName, EditorStyles.boldLabel);
+                GUILayout.Label($"{package.name} : <i>{package.version}</i>", EditorStyles.boldLabel);
 
-                if (IsPackageLinked(packageName))
+                if (IsPackageLinked(package.name))
                 {
                     GUILayout.Label("Linked", EditorStyles.centeredGreyMiniLabel, GUILayout.Width(120));
                 }
@@ -157,18 +161,9 @@ namespace CodeWriter.PackageSymLinker
         {
             var packagesFolderPath = GetPackagesFolderPath();
 
-            if (TryExecuteCmd($"dir \"{packagesFolderPath}\"", out var result) != 0)
-            {
-                Debug.LogError($"Failed to list directories in {packagesFolderPath}");
-                return;
-            }
+            var dirPaths = Directory.GetDirectories(packagesFolderPath);
 
-            var dirInfoLines = result
-                .Split(new[] {Environment.NewLine}, StringSplitOptions.RemoveEmptyEntries)
-                .Where(line => line.Contains("<JUNCTION>"))
-                .ToList();
-
-            directories = Directory.EnumerateDirectories(packagesFolderPath)
+            directories = dirPaths
                 .Where(path =>
                 {
                     const FileAttributes attrs = FileAttributes.Directory | FileAttributes.ReparsePoint;
@@ -176,25 +171,19 @@ namespace CodeWriter.PackageSymLinker
                 })
                 .Select(path =>
                 {
-                    var folderName = Path.GetFileName(path);
-                    var dirInfo = dirInfoLines.FirstOrDefault(line => line.Contains(folderName));
-                    var sourcePath = dirInfo != null &&
-                                     dirInfo.IndexOf('[') is int start &&
-                                     dirInfo.IndexOf(']') is int end &&
-                                     start != -1 && end != -1 && end > start
-                        ? dirInfo.Substring(start + 1, end - start - 1)
-                        : "INVALID";
+                    var srcPackageJsonPath = Path.Combine(path, "package.json");
+                    var packageJsonString = File.ReadAllText(srcPackageJsonPath);
+                    var packageInfo = JsonUtility.FromJson<Package>(packageJsonString);
 
                     return new SymlinkedDirInfo
                     {
                         path = path,
-                        name = folderName,
-                        sourcePath = sourcePath,
+                        package = packageInfo
                     };
                 })
                 .ToList();
 
-            if (this.directories.Count > 0)
+            if (directories.Count > 0)
             {
                 titleContent = new GUIContent($"Package Symlinker ({directories.Count})");
             }
@@ -237,9 +226,11 @@ namespace CodeWriter.PackageSymLinker
             }
 
             var dstPackagesFolderPath = GetPackagesFolderPath();
+
+#if UNITY_EDITOR_WIN
             var dstPackagePath = Path.Combine(dstPackagesFolderPath, packageInfo.name);
 
-            var fileExist = TryExecuteCmd($"dir \"{dstPackagePath}\"", out _) != 1;
+            var fileExist = Directory.Exists(dstPackagePath);
             if (fileExist)
             {
                 Debug.LogError($"Directory {dstPackagePath} already exist");
@@ -247,24 +238,38 @@ namespace CodeWriter.PackageSymLinker
             }
 
             var command = $"mklink /j \"{dstPackagePath}\" \"{srcFolderPath}\"";
-            if (TryExecuteCmd(command, out _) != 0)
+#else
+            var command = $"ln -s {srcFolderPath} {dstPackagesFolderPath}";
+#endif
+            if (TryExecuteCmd(command, out _, out var error) != 0)
             {
-                Debug.LogError("Failed to link package");
-                return;
+                if(string.IsNullOrEmpty(error) == false)
+                {
+                    Debug.LogError($"Failed to link package: {error}");
+                    return;
+                }
             }
 
             AddPackageToRecent(srcFolderPath);
+            Client.Resolve();
             AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
             ReloadLinkedPackages();
         }
 
         private void DeletePackage(string path)
         {
+#if UNITY_EDITOR_WIN
             var command = $"rd \"{path}\"";
-            if (TryExecuteCmd(command, out _) != 0)
+#else
+            var command = $"unlink {path}";
+#endif
+            if (TryExecuteCmd(command, out _, out var error) != 0)
             {
-                Debug.LogError("Failed to delete package link");
-                return;
+                if(string.IsNullOrEmpty(error) == false)
+                {
+                    Debug.LogError($"Failed to delete package link: {error}");
+                    return;
+                }
             }
 
             AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate);
@@ -279,12 +284,19 @@ namespace CodeWriter.PackageSymLinker
             return packageFolderPath.Replace('/', Path.DirectorySeparatorChar);
         }
 
-        public static int TryExecuteCmd(string command, out string result)
+        public static int TryExecuteCmd(string command, out string output, out string error)
         {
+#if UNITY_EDITOR_WIN
+            var cmd = "cmd.exe";
+            var args = $"/c {command}";
+#else
+            var cmd = "/bin/bash";
+            var args = $"-c \"{command}\"";
+#endif
             var startInfo = new ProcessStartInfo
             {
-                FileName = "cmd.exe",
-                Arguments = $"/c {command}",
+                FileName = cmd,
+                Arguments = args,
                 CreateNoWindow = true,
                 UseShellExecute = false,
                 RedirectStandardError = true,
@@ -296,15 +308,15 @@ namespace CodeWriter.PackageSymLinker
             var launchProcess = Process.Start(startInfo);
             if (launchProcess == null || launchProcess.HasExited || launchProcess.Id == 0)
             {
-                result = default;
+                output = error = string.Empty;
                 return int.MinValue;
             }
 
-            var output = new StringBuilder();
-            var error = new StringBuilder();
+            var outputBuilder = new StringBuilder();
+            var errorBuilder = new StringBuilder();
 
-            launchProcess.OutputDataReceived += (sender, e) => output.AppendLine(e.Data ?? "");
-            launchProcess.ErrorDataReceived += (sender, e) => error.AppendLine(e.Data ?? "");
+            launchProcess.OutputDataReceived += (sender, e) => outputBuilder.AppendLine(e.Data ?? "");
+            launchProcess.ErrorDataReceived += (sender, e) => errorBuilder.AppendLine(e.Data ?? "");
 
             launchProcess.BeginOutputReadLine();
             launchProcess.BeginErrorReadLine();
@@ -312,14 +324,9 @@ namespace CodeWriter.PackageSymLinker
 
             launchProcess.WaitForExit();
 
-            if (launchProcess.ExitCode != 0)
-            {
-                result = default;
-                return launchProcess.ExitCode;
-            }
-
-            result = output.ToString();
-            return 0;
+            output = outputBuilder.ToString();
+            error = errorBuilder.ToString();
+            return launchProcess.ExitCode;
         }
 
         private void RefreshRecentPackages()
@@ -327,9 +334,9 @@ namespace CodeWriter.PackageSymLinker
             recentPackages = EditorPrefs.GetString(RecentPackagesPrefsKey, "")
                 .Split(RecentPackagesSeparator, StringSplitOptions.RemoveEmptyEntries);
 
-            recentPackageNames = new string[recentPackages.Length];
+            recentPackageInfo = new Package[recentPackages.Length];
 
-            for (var i = 0; i < recentPackageNames.Length; i++)
+            for (var i = 0; i < recentPackageInfo.Length; i++)
             {
                 var packageJsonPath = Path.Combine(recentPackages[i], "package.json");
                 if (!File.Exists(packageJsonPath))
@@ -340,7 +347,7 @@ namespace CodeWriter.PackageSymLinker
                 var packageJsonString = File.ReadAllText(packageJsonPath);
                 var packageInfo = JsonUtility.FromJson<Package>(packageJsonString);
 
-                recentPackageNames[i] = packageInfo.name;
+                recentPackageInfo[i] = packageInfo;
             }
         }
 
@@ -365,9 +372,9 @@ namespace CodeWriter.PackageSymLinker
 
         private bool IsPackageLinked(string packageName)
         {
-            foreach (var info in directories)
+            foreach (var dir in directories)
             {
-                if (info.name == packageName)
+                if (dir.package.name == packageName)
                 {
                     return true;
                 }
@@ -377,17 +384,17 @@ namespace CodeWriter.PackageSymLinker
         }
 
         [Serializable]
-        private class Package
+        private struct Package
         {
             public string name;
+            public string version;
         }
 
         [Serializable]
-        private class SymlinkedDirInfo
+        private struct SymlinkedDirInfo
         {
             public string path;
-            public string name;
-            public string sourcePath;
+            public Package package;
         }
     }
 }
