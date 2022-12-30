@@ -3,8 +3,12 @@ Tool for maintaining symbolic linked packages for Unity
 
 [![Package Symlinker Preview](https://user-images.githubusercontent.com/26966368/104042200-3a2b1b00-51eb-11eb-875c-9503cf2af12b.png)](#)
 
-> NOTE: Windows only.
-> Please check the functionality on a test project before using it in production.
+Supported Editor Platforms:
+* Windows
+* MacOS
+* Linux*
+
+> Linux should work well, but has not been tested.
 
 ## About
 
